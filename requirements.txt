@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+docx2txt
+python-docx
+jinja2
+textstat

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LLM Readability Analyzer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>LLM Readability Analyzer</h1>
+    <form id="uploadForm" action="/analyze" method="post" enctype="multipart/form-data">
+        <input id="fileInput" type="file" name="files" multiple accept=".doc,.docx" required>
+    </form>
+    <script>
+        // Auto-submit the form when a file is selected
+        document.getElementById('fileInput').addEventListener('change', function() {
+            if(this.files.length > 0) {
+                document.getElementById('uploadForm').submit();
+            }
+        });
+    </script>
+    {% if results %}
+    <h2>Results</h2>
+    <table>
+        <tr><th>Filename</th><th>Readability Score</th></tr>
+        {% for result in results %}
+        <tr>
+            <td>{{ result.filename }}</td>
+            <td>{{ '%.2f' % result.score }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+    {% if suggestions %}
+    <div class="suggestions">
+        <h2>Suggestions to Improve Readability</h2>
+        <ul>
+        {% for suggestion in suggestions %}
+            <li>
+                <strong>{{ suggestion.text }}</strong>
+                <br>
+                <span style="color:#bfc9d1;font-size:0.98em;">Example: {{ suggestion.example }}</span>
+            </li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</body>
+</html>
