@@ -2,11 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>LLM Readability Analyzer</title>
+    <title>LLM Training Readability Analyzer</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h1>LLM Readability Analyzer</h1>
+    <h1>LLM Training Readability Analyzer</h1>
+    <p class="intro">Analyze how suitable your documents are for LLM training and inference.</p>
     <form id="uploadForm" action="/analyze" method="post" enctype="multipart/form-data">
         <input id="fileInput" type="file" name="files" multiple accept=".doc,.docx" required>
     </form>
@@ -21,11 +22,22 @@
     {% if results %}
     <h2>Results</h2>
     <table>
-        <tr><th>Filename</th><th>Readability Score</th></tr>
+        <tr>
+            <th>Filename</th>
+            <th>LLM Score</th>
+            <th>Explanation</th>
+        </tr>
         {% for result in results %}
         <tr>
             <td>{{ result.filename }}</td>
             <td>{{ '%.2f' % result.score }}</td>
+            <td>
+                <div class="score-explanation">
+                    <strong>{{ result.explanation.level }}</strong>
+                    <div class="training-value">{{ result.explanation.training_value }}</div>
+                    <div class="explanation-description">{{ result.explanation.description }}</div>
+                </div>
+            </td>
         </tr>
         {% endfor %}
     </table>
