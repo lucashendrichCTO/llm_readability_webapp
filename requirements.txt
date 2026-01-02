@@ -4,3 +4,5 @@ docx2txt
 python-docx
 jinja2
 textstat
+requests
+beautifulsoup4

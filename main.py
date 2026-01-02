@@ -7,6 +7,9 @@ from typing import List
 from tempfile import NamedTemporaryFile
 from docx import Document
 import docx2txt
+import requests
+from bs4 import BeautifulSoup
+from typing import Optional
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -29,6 +32,29 @@ def extract_text_from_doc(file_path):
     except Exception:
         return "(Could not extract text)"
 
+def extract_text_from_url(url: str) -> str:
+    try:
+        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Remove script and style elements
+        for script in soup(["script", "style", "nav", "footer", "header"]):
+            script.decompose()
+            
+        text = soup.get_text()
+        
+        # Break into lines and remove leading and trailing space on each
+        lines = (line.strip() for line in text.splitlines())
+        # Break multi-headlines into a line each
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        # Drop blank lines
+        text = '\n'.join(chunk for chunk in chunks if chunk)
+        
+        return text
+    except Exception as e:
+        return f"(Could not extract text from URL: {str(e)})"
+
 def llm_readability_score(text: str) -> float:
     # Calculate a score based on factors that make text easier for LLMs to process
     # Higher score = better for LLM training and inference
@@ -36,8 +62,8 @@ def llm_readability_score(text: str) -> float:
     import math
     from collections import Counter
     
-    # Initialize score at 40 (below average) - must earn points to reach higher levels
-    score = 40.0
+    # Initialize score at 30 (lower base to allow room for GEO points)
+    score = 30.0
     
     # Empty text gets zero score
     if not text or len(text.strip()) == 0:
@@ -116,7 +142,40 @@ def llm_readability_score(text: str) -> float:
     capitalized_words = sum(1 for word in re.findall(r'\b\w+\b', text) if word[0].isupper())
     capitalization_ratio = capitalized_words / max(1, len(words))
     if capitalization_ratio > 0.3 and capitalization_ratio < 0.7:  # Inconsistent capitalization
-        score -= 8
+        score -= 5
+
+    # --- GEO (Generative Engine Optimization) Metrics ---
+    
+    # 8. Answer-First Structure (Inverted Pyramid)
+    # Check if first non-empty paragraph is concise (< 60 words) -> implies direct answer
+    first_paragraph = paragraphs[0] if paragraphs else ""
+    first_para_words = len(re.findall(r'\b\w+\b', first_paragraph))
+    if 5 <= first_para_words <= 60:
+        score += 15  # Big bonus for getting to the point
+    elif first_para_words > 100:
+        score -= 5   # Penalty for burying the lede
+        
+    # 9. Question-Based Headings
+    # Look for short lines ending in '?'
+    question_headings = 0
+    lines = text.split('\n')
+    for line in lines:
+        line = line.strip()
+        # Heuristic: line is short enough to be a heading (e.g. < 15 words) and ends in ?
+        if 3 < len(line.split()) < 15 and line.endswith('?'):
+            question_headings += 1
+            
+    if question_headings >= 2:
+        score += 10
+    elif question_headings == 1:
+        score += 5
+        
+    # 10. Q&A Formatting (Explicit Question-Answer patterns)
+    # Simple heuristic: "Question:" or "Q:" followed by "Answer:" or "A:"
+    # OR just the presence of question headings followed by paragraph text
+    qa_patterns = len(re.findall(r'(?i)(question:|q:).+?(answer:|a:)', text, re.DOTALL))
+    if qa_patterns > 0 or question_headings >= 2:
+        score += 10
     
     # Ensure score is between 0 and 100
     return max(0, min(100, score))
@@ -205,6 +264,22 @@ def readability_suggestions(score):
             "text": "Reduce special characters and inconsistent formatting.",
             "example": "Minimize special characters to less than 5% of your text and maintain consistent capitalization patterns."
         })
+    if score <= 80:
+         suggestions.append({
+            "text": "Adopt an 'Answer-First' structure (Inverted Pyramid).",
+            "example": "Ensure your first paragraph is concise (under 60 words) and directly answers the main topic/query."
+        })
+    if score <= 70:
+        suggestions.append({
+            "text": "Use Question-Based Headings to map to user prompts.",
+            "example": "Change headers like 'Optimization implementation' to 'How do I implement LLM optimization?'"
+        })
+    if score <= 60:
+         suggestions.append({
+            "text": "Structure content with explicit Q&A formatting.",
+            "example": "LLMs prefer direct Q&A pairs. Use 'Question: ... Answer: ...' formats or clear question headers followed by direct answers."
+        })
+        
     if score <= 25:
         suggestions.append({
             "text": "Consider complete restructuring with more consistent patterns and clearer organization.",
@@ -217,29 +292,46 @@ def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "results": None})
 
 @app.post("/analyze", response_class=HTMLResponse)
-async def analyze(request: Request, files: List[UploadFile] = File(...)):
+async def analyze(request: Request, files: List[UploadFile] = File(None), url: Optional[str] = Form(None)):
     results = []
     suggestions = []
-    for file in files:
-        ext = os.path.splitext(file.filename)[1].lower()
-        with NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-            tmp.write(await file.read())
-            tmp_path = tmp.name
-        if ext == ".docx":
-            text = extract_text_from_docx(tmp_path)
-        elif ext == ".doc":
-            text = extract_text_from_doc(tmp_path)
-        else:
-            text = "(Unsupported file type)"
-        score = llm_readability_score(text) if text else 0
+    
+    # Process URL if provided
+    if url and url.strip():
+        text = extract_text_from_url(url)
+        score = llm_readability_score(text) if text and not text.startswith("(") else 0
         explanation = get_score_explanation(score)
         results.append({
-            "filename": file.filename, 
+            "filename": url,
             "score": score,
             "explanation": explanation
         })
         suggestions.extend(readability_suggestions(score))
-        os.remove(tmp_path)
+
+    # Process files if provided
+    if files:
+        for file in files:
+            if not file.filename: # Handle empty file submission
+                continue
+            ext = os.path.splitext(file.filename)[1].lower()
+            with NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                tmp.write(await file.read())
+                tmp_path = tmp.name
+            if ext == ".docx":
+                text = extract_text_from_docx(tmp_path)
+            elif ext == ".doc":
+                text = extract_text_from_doc(tmp_path)
+            else:
+                text = "(Unsupported file type)"
+            score = llm_readability_score(text) if text else 0
+            explanation = get_score_explanation(score)
+            results.append({
+                "filename": file.filename, 
+                "score": score,
+                "explanation": explanation
+            })
+            suggestions.extend(readability_suggestions(score))
+            os.remove(tmp_path)
     # Sort by score descending (higher = easier to read)
     results.sort(key=lambda x: x["score"], reverse=True)
     # Remove duplicate suggestions by text

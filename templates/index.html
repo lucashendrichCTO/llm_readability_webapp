@@ -9,16 +9,16 @@
     <h1>LLM Training Readability Analyzer</h1>
     <p class="intro">Analyze how suitable your documents are for LLM training and inference.</p>
     <form id="uploadForm" action="/analyze" method="post" enctype="multipart/form-data">
-        <input id="fileInput" type="file" name="files" multiple accept=".doc,.docx" required>
+        <div class="input-group">
+            <label for="urlInput">Analyze a URL:</label>
+            <input id="urlInput" type="url" name="url" placeholder="https://example.com/article" style="width: 100%; padding: 8px; margin-bottom: 10px;">
+        </div>
+        <div class="input-group">
+            <label for="fileInput">Or upload documents:</label>
+            <input id="fileInput" type="file" name="files" multiple accept=".doc,.docx">
+        </div>
+        <button type="submit" style="margin-top: 15px; padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Analyze</button>
     </form>
-    <script>
-        // Auto-submit the form when a file is selected
-        document.getElementById('fileInput').addEventListener('change', function() {
-            if(this.files.length > 0) {
-                document.getElementById('uploadForm').submit();
-            }
-        });
-    </script>
     {% if results %}
     <h2>Results</h2>
     <table>
